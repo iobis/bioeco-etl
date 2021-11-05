@@ -561,3 +561,31 @@ for (identifier in missing_spatial$identifier) {
     write_sf(glue("{new_folder}/{identifier}.shp"), layer = identifier)
 }
 ```
+
+# Other data exports
+## Users
+
+This exports users in a format suitable for Django's `loaddata`.
+
+```{r warning=FALSE, message=FALSE}
+users <- df_combined %>%
+  filter(!is.na(contact_email)) %>%
+  select(first_name = contact_firstname, last_name = contact_lastname, email = contact_email, username = contact_email) %>%
+  mutate(
+    is_superuser = FALSE
+  ) %>%
+  distinct()
+
+users
+```
+
+```{r warning=FALSE, message=FALSE}
+users_json <- split(users, seq(nrow(users))) %>%
+  purrr::map(function(x) {
+    return(list(model = "people.profile", fields = as.list(x)))
+  }) %>%
+  unname() %>%
+  jsonlite::toJSON(auto_unbox = TRUE)
+
+writeLines(users_json, "output/users.json")
+```
