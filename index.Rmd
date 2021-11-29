@@ -12,6 +12,13 @@ knit: (function(inputFile, encoding) {
 
 This is an updated version of the original notebook which aims to export data for import into GeoNode.
 
+# Configuration
+
+```{r warning = FALSE, message = FALSE}
+geonode_url <- "https://geonode.goosocean.org"
+database_host <- "geonode.goosocean.org"
+```
+
 # Load packages
 
 ```{r warning = FALSE, message = FALSE}
@@ -31,6 +38,7 @@ library(xlsx)
 library(purrr)
 library(glue)
 library(geojsonsf)
+library(jsonlite)
 ```
 
 # Original dataset
@@ -335,6 +343,14 @@ df_combined <- bind_rows(df_initial, df_eurosea) %>%
 ## Assign identifiers
 
 ```{r warning=FALSE, message=FALSE}
+shorten_identifier <- function(identifier) {
+  if (nchar(identifier) > 58) {
+    return(paste0(substring(identifier, 1, 29), substring(identifier, nchar(identifier) - 28, nchar(identifier))))
+  } else {
+    return(identifier)
+  }
+}
+
 make_identifier <- function(name) {
   name %>%
     tolower() %>%
@@ -342,7 +358,9 @@ make_identifier <- function(name) {
     str_trim() %>%
     str_replace_all("[\\s-–]+", "_") %>%
     iconv(from = "UTF-8", to = "ASCII//TRANSLIT") %>%
-    str_replace_all("[()\":\',&/\\.^`]", "")
+    str_replace_all("[()\":\',&/\\.^`]", "") %>%
+    purrr::map(shorten_identifier) %>%
+    unlist()
 }
 
 df_combined <- df_combined %>%
@@ -365,8 +383,7 @@ duplicates %>%
 
 ```{r warning=FALSE, message=FALSE}
 df_combined$original_identifier <- df_combined$identifier
-
-df_combined$identifier[duplicated(df_combined$identifier)] <- paste0(df_combined$identifier[duplicated(df_combined$identifier)], "_duplicate")
+df_combined$identifier <- make.unique(df_combined$identifier, sep = "_")
 ```
 
 # Process spatial data in the geojson column
@@ -525,7 +542,7 @@ for (identifier in identifiers) {
     st_coordinates() %>%
     st_linestring() %>%
     st_sfc() %>%
-    st_sf() %>%
+    st_sf(crs = 4326) %>%
     write_sf(glue("{new_folder}/{identifier}.shp"), layer = identifier)
   df_combined$has_shapefile[df_combined$identifier == identifier] <- TRUE
 }
@@ -539,7 +556,7 @@ This was not processed as the mapping is unclear.
 
 Not processed yet, coordinates need to be converted.
 
-# Missing spatial data
+## Missing spatial data
 
 ```{r warning=FALSE, message=FALSE}
 missing_spatial <-df_combined %>%
@@ -562,7 +579,76 @@ for (identifier in missing_spatial$identifier) {
 }
 ```
 
-# Other data exports
+# GeoNode spatial layer import
+
+Before proceeding with the next section, import the spatial layers into GeoNode using `python manage.py importlayers`.
+
+# GeoNode metadata import
+
+In this section we will import EOVs and users into GeoNode, and finally update the layer metadata.
+
+## EOVs
+
+This exports EOVs in a format suitable for Django's `loaddata`.
+
+```{r warning=FALSE, message=FALSE}
+eovs <- data.frame(
+  name = c(
+    "Phytoplankton biomass and diversity", 
+    "Zooplankton biomass and diversity", 
+    "Fish abundance and distribution", 
+    "Marine turtles abundance and distribution", 
+    "Marine birds abundance and distribution", 
+    "Marine mammals abundance and distribution", 
+    "Hard coral cover and composition", 
+    "Seagrass cover and composition", 
+    "Macroalgal canopy cover and composition", 
+    "Mangrove cover and composition", 
+    "Microbe biomass and diversity", 
+    "Invertebrate abundance and distribution"
+  ),
+  short_name = c(
+    "Phytoplankton",
+    "Zooplankton",
+    "Fish",
+    "Turtles",
+    "Birds",
+    "Mammals",
+    "Hard coral",
+    "Seagrass",
+    "Macroalgae",
+    "Mangrove",
+    "Microbes",
+    "Invertebrates"
+  ),
+  url = c(
+    "https://www.goosocean.org/index.php?option=com_oe&task=viewDocumentRecord&docID=17507",
+    "https://www.goosocean.org/index.php?option=com_oe&task=viewDocumentRecord&docID=17509",
+    "https://www.goosocean.org/index.php?option=com_oe&task=viewDocumentRecord&docID=17510",
+    "https://www.goosocean.org/index.php?option=com_oe&task=viewDocumentRecord&docID=17511",
+    "https://www.goosocean.org/index.php?option=com_oe&task=viewDocumentRecord&docID=17511",
+    "https://www.goosocean.org/index.php?option=com_oe&task=viewDocumentRecord&docID=17511",
+    "https://www.goosocean.org/index.php?option=com_oe&task=viewDocumentRecord&docID=17512",
+    "https://www.goosocean.org/index.php?option=com_oe&task=viewDocumentRecord&docID=17513",
+    "https://www.goosocean.org/index.php?option=com_oe&task=viewDocumentRecord&docID=17515",
+    "https://www.goosocean.org/index.php?option=com_oe&task=viewDocumentRecord&docID=17514",
+    NA,
+    NA
+  ),
+  pk = seq(1, 12)
+)
+
+eovs_json <- eovs %>%
+  split(f = seq(nrow(.))) %>%
+  unname() %>%
+  lapply(function(row) {
+    list(model = "goos.eov", pk = row$pk, fields = list(name = row$name, short_name = row$short_name, description = row$name, url = row$url))
+  }) %>%
+  jsonlite::toJSON(auto_unbox = TRUE)
+
+writeLines(eovs_json, "output/eovs.json")
+```
+
 ## Users
 
 This exports users in a format suitable for Django's `loaddata`.
@@ -574,7 +660,11 @@ users <- df_combined %>%
   mutate(
     is_superuser = FALSE
   ) %>%
-  distinct()
+  distinct(username, .keep_all = TRUE) %>%
+  mutate(pk = 2000 + row_number())
+
+df_combined <- df_combined %>%
+  left_join(users %>% select(user_pk = pk, contact_email = username), by = "contact_email")
 
 users
 ```
@@ -582,10 +672,93 @@ users
 ```{r warning=FALSE, message=FALSE}
 users_json <- split(users, seq(nrow(users))) %>%
   purrr::map(function(x) {
-    return(list(model = "people.profile", fields = as.list(x)))
+    return(list(model = "people.profile", pk = x$pk, fields = as.list(x %>% select(-pk))))
   }) %>%
   unname() %>%
   jsonlite::toJSON(auto_unbox = TRUE)
 
 writeLines(users_json, "output/users.json")
+```
+
+## Layers
+
+First get all the layers from the GeoNode API so we have a mapping between layer identifiers and primary keys.
+
+```{r warning=FALSE, message=FALSE}
+layer_pks <- jsonlite::fromJSON(glue("{geonode_url}/api/v2/layers?page_size=10000"))$layers %>%
+  select(pk, identifier = name) %>%
+  mutate(pk = as.numeric(pk))
+
+df_combined <- df_combined %>%
+  left_join(layer_pks, by = "identifier")
+```
+
+```{r warning=FALSE, message=FALSE, eval=FALSE}
+con <- DBI::dbConnect(RPostgres::Postgres(), dbname = "geonode", host = database_host, port = 5432, user = "geonode", password = "geonode")
+
+update_layer <- function(row) {
+
+  # title, abstract_en, maintenance_frequency, temporal_extent_start, temporal_extent_end, url
+
+  RPostgres::dbSendQuery(con,
+    "update base_resourcebase set title = $1, abstract = $2, maintenance_frequency = $3, temporal_extent_start = $4, temporal_extent_end = $5 where id = $6",
+    list(row$name, row$abstract, row$temporal_resolution, row$start_date, row$end_date, row$pk)
+  ) %>% dbClearResult()
+
+  RPostgres::dbSendQuery(con,
+    "update layers_layer set title_en = $1, abstract_en = $2, url = $3 where resourcebase_ptr_id = $4",
+    list(row$name, row$abstract, row$url, row$pk)
+  ) %>% dbClearResult()
+
+  # eovs (layers_layer_eov)
+
+  RPostgres::dbSendQuery(con,
+    "delete from layers_layer_eovs where layer_id = $1",
+    list(row$pk)
+  ) %>% dbClearResult()
+  
+  eov_ids <- which(c(
+    row$eov_phytoplankton,
+    row$eov_zooplankton,
+    row$eov_fish,
+    row$eov_seaturtles,
+    row$eov_birds,
+    row$eov_mammals,
+    row$eov_hardcoral,
+    row$eov_seagrass,
+    row$eov_macroalgae,
+    row$eov_mangroves,
+    row$eov_microbes,
+    row$eov_benthicinvertebrates
+  ))
+  
+  for (eov_id in eov_ids) {
+    RPostgres::dbSendQuery(con,
+      "insert into layers_layer_eovs (layer_id, eov_id) values ($1, $2)",
+      list(row$pk, eov_id)
+    ) %>% dbClearResult()
+  }
+  
+  # contact (base_contactrole)
+  
+  RPostgres::dbSendQuery(con,
+    "delete from base_contactrole where resource_id = $1 and role = 'pointOfContact'",
+    list(row$pk)
+  ) %>% dbClearResult()
+
+  if (!is.na(row$user_pk)) {  
+    RPostgres::dbSendQuery(con,
+      "insert into base_contactrole (resource_id, contact_id, role) values ($1, $2, 'pointOfContact')",
+      list(row$pk, row$user_pk)
+    ) %>% dbClearResult()
+  }
+
+}
+
+for (i in 1:nrow(df_combined)) {
+  message(i)
+  if (!is.na(df_combined$pk[i])) {
+    update_layer(df_combined[i,])
+  }
+}
 ```
