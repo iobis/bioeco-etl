@@ -1,3 +1,3 @@
-# bioeco-portal-etl
+# bioeco-etl
 
 See notebook at https://iobis.github.io/bioeco-etl/.
