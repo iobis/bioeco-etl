@@ -2,8 +2,11 @@
 title: GOOS BioEco portal data loading
 date: "`r Sys.Date()`"
 author: Pieter Provoost
-output: (function(...) {
-  rmdformats::robobook(toc_depth = 3, pandoc_args = c("+RTS", "-K2000m", "-RTS"), ...) })
+#output: (function(...) { rmdformats::robobook(toc_depth = 3, pandoc_args = c("+RTS", "-K2000m", "-RTS"), ...) })
+#output: bookdown::pdf_document2: latex_engine: lualatex
+output:
+  pdf_document:
+    latex_engine: xelatex
 editor_options: 
   chunk_output_type: console
 knit: (function(inputFile, encoding) {
