@@ -18,7 +18,8 @@ This notebook backs up EOV/network links from GeoNode and restores them as keywo
 # Configuration
 
 ```{r warning = FALSE, message = FALSE}
-database_host <- "geonode.goosocean.org"
+old_host <- "geonode.goosocean.org"
+new_host <- "geonode-dev.obis.org"
 ```
 
 # Load packages
@@ -31,15 +32,40 @@ library(readr)
 library(purrr)
 library(glue)
 library(RPostgres)
+library(jsonlite)
+library(stringr)
 ```
 
 # Read links
 
-```{r warning=FALSE, message=FALSE, eval=FALSE}
-con <- DBI::dbConnect(RPostgres::Postgres(), dbname = "geonode", host = database_host, port = 5432, user = "geonode", password = "geonode")
+```{r warning=FALSE, message=FALSE}
+con_old <- DBI::dbConnect(RPostgres::Postgres(), dbname = "geonode", host = old_host, port = 5432, user = "geonode", password = "geonode")
 
 layers_layer_eovs <- dbSendQuery(con, "select l.layer_id, e.id as eov_id, e.short_name from layers_layer_eovs l left join goos_eov e on l.eov_id = e.id") %>%
   dbFetch()
 
 write.csv(layers_layer_eovs, file = "../data/layers_layer_eovs.csv", row.names = FALSE)
 ```
+
+# Get keywords list
+
+```{r warning=FALSE, message=FALSE}
+tkeywords <- fromJSON(glue("https://{new_host}/api/v2/tkeywords?page_size=1000"))$tkeywords %>%
+  filter(str_detect(about, "goosocean"))
+```
+
+# Update
+
+Update `base_resourcebase_tkeywords` with columns `id`, `resourcebase_id`, `thesauruskeyword_id`.
+
+```{r warning=FALSE, message=FALSE}
+base_resourcebase_tkeywords <- layers_layer_eovs %>%
+  left_join(tkeywords, by = c("short_name" = "alt_label")) %>%
+  select(resourcebase_id = layer_id, thesauruskeyword_id = id)
+
+con_new <- DBI::dbConnect(RPostgres::Postgres(), dbname = "geonode", host = new_host, port = 5432, user = "geonode", password = "geonode")
+dbWriteTable(con_new, "base_resourcebase_tkeywords", base_resourcebase_tkeywords, overwrite = TRUE)
+```
+
+
+

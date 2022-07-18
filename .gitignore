@@ -3,5 +3,6 @@ output
 env.txt
 .env
 .Rhistory
-
+*.Rproj
+.Rproj.user
 

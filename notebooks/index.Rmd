@@ -18,8 +18,10 @@ This is an updated version of the original notebook which aims to export data fo
 # Configuration
 
 ```{r warning = FALSE, message = FALSE}
-geonode_url <- "https://geonode.goosocean.org"
-database_host <- "geonode.goosocean.org"
+#geonode_url <- "https://geonode.goosocean.org"
+#database_host <- "geonode.goosocean.org"
+geonode_url <- "http://localhost"
+database_host <- "localhost"
 ```
 
 # Load packages
@@ -89,7 +91,9 @@ df_initial <- df_source_4 %>%
     eov_seaturtles = Sea_Turtles,
     eov_zooplankton = Zooplankton,
     eov_benthicinvertebrates = Benthic_Invertebrate,
-    eov_mammals = Marine_Mammals
+    eov_mammals = Marine_Mammals,
+    in_obis = In_OBIS,
+    interest_obis = Interest_OBIS
   ) %>%
   left_join(df_source_2, by = "name") %>%
   mutate_at(vars(matches("eov")), ~ifelse(is.na(.), FALSE, TRUE)) %>%
